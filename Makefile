@@ -195,6 +195,7 @@ UPROGS=\
 	$U/_zombie\
     $U/_sleep\
     $U/_ping-pong\
+    $U/_primes\
 
 
 
@@ -211,6 +212,7 @@ UPROGS += \
 endif
 
 ifeq ($(LAB),lazy)
+
 UPROGS += \
 	$U/_lazytests
 endif
