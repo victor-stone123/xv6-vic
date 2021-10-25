@@ -197,6 +197,7 @@ UPROGS=\
     $U/_ping-pong\
     $U/_primes\
     $U/_find\
+    $U/_xargs\
 
 
 
