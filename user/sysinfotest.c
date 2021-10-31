@@ -83,11 +83,12 @@ testcall() {
     printf("FAIL: sysinfo failed\n");
     exit(1);
   }
-
+  
   if (sysinfo((struct sysinfo *) 0xeaeb0b5b00002f5e) !=  0xffffffffffffffff) {
     printf("FAIL: sysinfo succeeded with bad argument\n");
     exit(1);
   }
+
 }
 
 void testproc() {
@@ -107,6 +108,7 @@ void testproc() {
   if(pid == 0){
     sinfo(&info);
     if(info.nproc != nproc+1) {
+     // printf("fork\n");
       printf("sysinfotest: FAIL nproc is %d instead of %d\n", info.nproc, nproc+1);
       exit(1);
     }
@@ -115,6 +117,7 @@ void testproc() {
   wait(&status);
   sinfo(&info);
   if(info.nproc != nproc) {
+     // printf("wait\n");
       printf("sysinfotest: FAIL nproc is %d instead of %d\n", info.nproc, nproc);
       exit(1);
   }
@@ -125,8 +128,11 @@ main(int argc, char *argv[])
 {
   printf("sysinfotest: start\n");
   testcall();
+ // printf("test all end\n");
   testmem();
+ // printf("test mem end\n");
   testproc();
+ // printf("test proc end\n");
   printf("sysinfotest: OK\n");
   exit(0);
 }
