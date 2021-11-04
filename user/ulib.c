@@ -9,6 +9,11 @@
 
 
 
+
+
+
+
+
 char*
 strcpy(char *s, const char *t)
 {
@@ -145,7 +150,10 @@ memcpy(void *dst, const void *src, uint n)
 int
 ugetpid(void)
 {
-  struct usyscall *u = (struct usyscall *)USYSCALL;
-  return u->pid;
+//  printf("starting USYSCALL\n");
+    struct usyscall *u = (struct usyscall *)USYSCALL;
+//  printf("complete USYSCALL\n");
+    return u->pid;
+//    return 0;
 }
 #endif

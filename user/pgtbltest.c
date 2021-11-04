@@ -35,12 +35,14 @@ ugetpid_test()
 
   for (i = 0; i < 64; i++) {
     int ret = fork();
+   // printf("fork completed\n");
     if (ret != 0) {
       wait(&ret);
       if (ret != 0)
         exit(1);
       continue;
     }
+   // printf("starting ugetpid\n");
     if (getpid() != ugetpid())
       err("missmatched PID");
     exit(0);
