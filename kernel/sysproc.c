@@ -57,7 +57,6 @@ sys_sleep(void)
 {
   int n;
   uint ticks0;
-
   if(argint(0, &n) < 0)
     return -1;
   acquire(&tickslock);
@@ -70,6 +69,7 @@ sys_sleep(void)
     sleep(&ticks, &tickslock);
   }
   release(&tickslock);
+  backtrace();
   return 0;
 }
 
@@ -95,3 +95,49 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+int
+sys_sigalarm(void)
+{
+
+  //printf("syscall enterred\n");
+  int nticks;
+  void (*handler) ();
+  struct proc *p = myproc();
+
+  if(argint(0, &nticks) < 0)
+    return -1;
+
+  if(argaddr(1, (uint64 *) &handler) <0)
+    return -1;
+  
+  if (nticks == 0 && (uint64)handler ==0 )
+  {
+    //printf("alarm not enabled!\n");
+    p->alarm_enable = 0;
+  }
+  else
+  {
+    //printf("alarm enabled!\n");
+    p->alarm_enable = 1;
+
+    p->alarm_handler = handler;
+    p->alarm_interval = nticks;
+
+    p->passed_ticks = 0;
+
+  }
+
+  return 0;
+
+}
+
+int
+sys_sigreturn(void)
+{
+  struct proc *p = myproc();
+  memmove(p->trapframe, &(p->alarm_saved_registers), sizeof(struct trapframe));
+  p->handler_active =0;
+  return 0;
+}
+

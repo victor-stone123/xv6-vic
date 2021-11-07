@@ -16,6 +16,7 @@
 #include "proc.h"
 
 volatile int panicked = 0;
+extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 // lock to avoid interleaving concurrent printf's.
 static struct {
@@ -122,6 +123,7 @@ panic(char *s)
   printf(s);
   printf("\n");
   panicked = 1; // freeze uart output from other CPUs
+  backtrace();  // show the kernel's backtrace
   for(;;)
     ;
 }
@@ -132,3 +134,25 @@ printfinit(void)
   initlock(&pr.lock, "pr");
   pr.locking = 1;
 }
+
+void 
+backtrace (void)
+{
+  uint64 cur_frame_p, return_addr;
+  uint64 stack_top_p, stack_bottom_p;
+
+  cur_frame_p = r_fp();
+  stack_top_p = PGROUNDUP(cur_frame_p);
+  stack_bottom_p = PGROUNDDOWN(cur_frame_p);
+
+  printf("backtrace:\n");
+  while ((cur_frame_p <= stack_top_p) && (cur_frame_p >= stack_bottom_p) )
+  {
+    return_addr = * (uint64 *) (cur_frame_p-8);
+    if ((return_addr <= (uint64)etext) && (return_addr >= KERNBASE))
+        printf("%p\n",return_addr );
+    cur_frame_p  = * (uint64 *)(cur_frame_p-16);
+  }
+  
+}
+
