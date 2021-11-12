@@ -6,6 +6,7 @@
 #include "proc.h"
 #include "defs.h"
 
+extern int page_reference_count[];
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -154,7 +155,9 @@ freeproc(struct proc *p)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
   if(p->pagetable)
+  {
     proc_freepagetable(p->pagetable, p->sz);
+  }
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;

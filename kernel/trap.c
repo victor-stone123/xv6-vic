@@ -8,6 +8,7 @@
 
 struct spinlock tickslock;
 uint ticks;
+extern int page_reference_count[];
 
 extern char trampoline[], uservec[], userret[];
 
@@ -37,7 +38,9 @@ void
 usertrap(void)
 {
   int which_dev = 0;
-
+  pte_t *pte;
+  uint64 pa;
+  char *mem;
   if((r_sstatus() & SSTATUS_SPP) != 0)
     panic("usertrap: not from user mode");
 
@@ -65,7 +68,40 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if((which_dev = devintr()) != 0){
+  } else if(r_scause() == 15){
+
+    if (r_stval() < MAXVA)
+    {
+      pte = walk(p->pagetable, r_stval(), 0);
+      pa = PTE2PA(*pte);
+
+      if (*pte & PTE_COW)
+      {
+        *pte = (*pte & (~PTE_COW)) | PTE_W;
+        if (page_reference_count[PA2PAGENUM(pa)] > 1)
+        {
+          --page_reference_count[PA2PAGENUM(pa)];
+          if((mem = kalloc()) != 0)
+          {
+            memmove(mem, (char*)pa, PGSIZE);
+            *pte = PA2PTE(mem) | PTE_FLAGS(*pte) | PTE_W;
+          } 
+          else
+            p->killed = 1;
+        }
+      }
+      else
+      {
+        printf("page fault! pid: %d \n", p->pid);
+        p->killed = 1;
+      }
+    }
+    else
+    {
+      //printf("pid %d write to addresses above MAXVA!\n", p->pid);
+      p->killed = 1;
+    }
+  }else if((which_dev = devintr()) != 0){
     // ok
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);

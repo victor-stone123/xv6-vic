@@ -74,7 +74,6 @@ copyout(char *s)
 
   for(int ai = 0; ai < 2; ai++){
     uint64 addr = addrs[ai];
-
     int fd = open("README", 0);
     if(fd < 0){
       printf("open(README) failed\n");
@@ -2699,10 +2698,11 @@ execout(char *s)
       exec("echo", args);
       exit(0);
     } else {
+      printf(".");
       wait((int*)0);
+      printf(".");
     }
   }
-
   exit(0);
 }
 
@@ -2818,11 +2818,13 @@ main(int argc, char *argv[])
     void (*f)(char *);
     char *s;
   } tests[] = {
+    {execout, "execout"},
+#if 1    
+    {copyout, "copyout"},
+    {pgbug, "pgbug" },
     {MAXVAplus, "MAXVAplus"},
     {manywrites, "manywrites"},
-    {execout, "execout"},
     {copyin, "copyin"},
-    {copyout, "copyout"},
     {copyinstr1, "copyinstr1"},
     {copyinstr2, "copyinstr2"},
     {copyinstr3, "copyinstr3"},
@@ -2831,7 +2833,6 @@ main(int argc, char *argv[])
     {truncate2, "truncate2"},
     {truncate3, "truncate3"},
     {reparent2, "reparent2"},
-    {pgbug, "pgbug" },
     {sbrkbugs, "sbrkbugs" },
     // {badwrite, "badwrite" },
     {badarg, "badarg" },
@@ -2881,6 +2882,7 @@ main(int argc, char *argv[])
     {iref, "iref"},
     {forktest, "forktest"},
     {bigdir, "bigdir"}, // slow
+#endif
     { 0, 0},
   };
 

@@ -6,6 +6,7 @@
 #include "defs.h"
 #include "fs.h"
 
+
 /*
  * the kernel's page table.
  */
@@ -14,6 +15,7 @@ pagetable_t kernel_pagetable;
 extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
+extern int page_reference_count[];
 
 // Make a direct-map page table for the kernel.
 pagetable_t
@@ -304,20 +306,27 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
-
+  //char *mem;
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
+
+    *pte = *pte | PTE_COW;
+    *pte = *pte & (~PTE_W);
     flags = PTE_FLAGS(*pte);
+
+/*
     if((mem = kalloc()) == 0)
       goto err;
     memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+*/
+    //printf("fork_map...\n");
+    ++page_reference_count[PA2PAGENUM(pa)];
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
+      //kfree(mem);
       goto err;
     }
   }
@@ -349,8 +358,40 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
 
+#if 1
+  pte_t *pte;
+  uint64 pa;
+  char *mem;
+#endif
+
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+
+#if 1
+    if ((va0 >= MAXVA) || (pte = walk(pagetable, va0, 0)) == 0)
+      return -1;
+
+    pa = PTE2PA(*pte);
+
+    if (*pte & PTE_COW)
+    {
+      *pte = (*pte & (~PTE_COW)) | PTE_W;
+      if (page_reference_count[PA2PAGENUM(pa)] > 1)
+      {
+        --page_reference_count[PA2PAGENUM(pa)];
+        if((mem = kalloc()) != 0)
+        {
+          memmove(mem, (char*)pa, PGSIZE);
+          *pte = PA2PTE(mem) | PTE_FLAGS(*pte) | PTE_W;
+        }
+        else
+          panic("no free memory!"); 
+      }
+    }
+
+#endif
+
+
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
@@ -376,6 +417,8 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
+    if (va0 >= MAXVA)
+      return -1;
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
@@ -403,6 +446,8 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 
   while(got_null == 0 && max > 0){
     va0 = PGROUNDDOWN(srcva);
+    if (va0 >=MAXVA)
+      return -1;
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
