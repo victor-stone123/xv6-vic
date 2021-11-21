@@ -1,0 +1,4 @@
+when two put_thread simultaleously find that the key is not in the hash table.
+
+but before the first thread complete the insertion of the new key by updating the table entry,
+the second thread update the table entry, which makes the first thread's update disappear.
