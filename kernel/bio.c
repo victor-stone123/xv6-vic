@@ -119,6 +119,11 @@ bget(uint dev, uint blockno)
   int id=blockno % HASHSIZ;
   struct buf * b;
   struct buf * bcan;
+  struct buf * bcan_min;
+  /*
+  int ref_0_count=0;
+  uint ticksmin;
+  */
   acquire(&cachelocks[id]);
   //int temp=0;
   for (b=cachehashtable[id]; b!= &bcache.head; b=b->next)
@@ -147,27 +152,43 @@ bget(uint dev, uint blockno)
     bcan=&bcache.buf[i];
     if (bcan->refcnt == 0)
     {
-      //printf("candidte: %p, can_idex: %d, b_idex:%d can_blockno: %d \n", bcan, bcan->blockno % HASHSIZ, id, bcan->blockno);
-      if (bcan->blockno % HASHSIZ != id)
+    /* 
+      if (ref_0_count==0)
       {
-        bcan->valid = 0;
-        bcan->refcnt = 1;
-        bcan->dev = dev;
+        ticksmin= bcan->b_ticks;
+        bcan_min=bcan;
+      }
+      else if (bcan->b_ticks < ticksmin)
+      {
+        ticksmin= bcan->b_ticks;
+        bcan_min=bcan;
+      }
+      ref_0_count++;
+      if (i < NBUF-1)
+        continue;
+    */
+      //printf("candidte: %p, can_idex: %d, b_idex:%d can_blockno: %d \n", bcan, bcan->blockno % HASHSIZ, id, bcan->blockno);
+      bcan_min=bcan;
+      if (bcan_min->blockno % HASHSIZ != id)
+      {
+        bcan_min->valid = 0;
+        bcan_min->refcnt = 1;
+        bcan_min->dev = dev;
         evict(bcan);
-        bcan->blockno = blockno;
-        install(bcan);
+        bcan_min->blockno = blockno;
+        install(bcan_min);
       }
       else
       {
-        bcan->valid = 0;
-        bcan->refcnt = 1;
-        bcan->blockno = blockno;
-        if(!find(bcan))
-          install(bcan);
+        bcan_min->valid = 0;
+        bcan_min->refcnt = 1;
+        bcan_min->blockno = blockno;
+        if(!find(bcan_min))
+          install(bcan_min);
       }
       release(&bcache.lock);
-      acquiresleep(&bcan->lock);
-      return bcan;
+      acquiresleep(&bcan_min->lock);
+      return bcan_min;
     }
   }
   panic("bget: no buffers");
