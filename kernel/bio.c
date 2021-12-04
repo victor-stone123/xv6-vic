@@ -22,6 +22,9 @@
 #include "defs.h"
 #include "fs.h"
 #include "buf.h"
+extern uint ticks;
+
+#define lock_lab 1
 
 struct {
   struct spinlock lock;
@@ -33,13 +36,166 @@ struct {
   struct buf head;
 } bcache;
 
+#if lock_lab
+static struct buf * cachehashtable[HASHSIZ];
+static struct spinlock cachelocks[HASHSIZ];
+
+void
+binit(void)
+{
+  initlock(&bcache.lock, "bcache");
+  for (int i=0; i< HASHSIZ; i++)
+  {
+    initcachehashlock(&cachelocks[i], "bcache_%d", i);
+    cachehashtable[i] = &bcache.head;
+  }
+/*
+  for (int i=0; i<HASHSIZ; i++)
+  {
+    printf("%s\n",cachelocks[i].name);
+  }
+*/
+}
+
+void
+evict(struct buf * be)
+{
+  int id=be->blockno % HASHSIZ;
+  struct buf * b;
+  struct buf * bpre;
+  acquire(&cachelocks[id]);
+  for (bpre=b=cachehashtable[id]; b!=&bcache.head; bpre=b, b=b->next)
+  {
+    //if (b->dev == be->dev && b->blockno == be->blockno)
+    if ( b == be)
+    {
+      if (bpre==b)
+      {
+        cachehashtable[id]=be->next;
+      }
+      else
+      {
+        bpre->next = be->next;
+      }
+      //printf("index: %d, evict, block_address: %p， b->next address: %p\n", id, be, be->next);
+      break;
+    }
+  }
+  release(&cachelocks[id]);
+}
+
+void
+install(struct buf *b)
+{
+  int id = b->blockno % HASHSIZ;
+  acquire(&cachelocks[id]);
+  b->next = cachehashtable[id];
+  cachehashtable[id]=b;
+  //printf("index: %d, install, block address: %p, b->next address: %p\n", id, b, b->next);
+  release(&cachelocks[id]);
+}
+int
+find(struct buf *bf)
+{
+  struct buf *b;
+  int id = bf->blockno % HASHSIZ;  
+  acquire(&cachelocks[id]);
+  for(b=cachehashtable[id]; b!=&bcache.head; b=b->next)
+  {
+    if(b==bf)
+    {
+      release(&cachelocks[id]);
+      return 1;
+    }
+  }
+  release(&cachelocks[id]);
+  return 0;
+
+}
+
+static struct buf *
+bget(uint dev, uint blockno)
+{
+  int id=blockno % HASHSIZ;
+  struct buf * b;
+  struct buf * bcan;
+  acquire(&cachelocks[id]);
+  //int temp=0;
+  for (b=cachehashtable[id]; b!= &bcache.head; b=b->next)
+  {
+    //printf("index: %d, loop: %d, block address: %p, block no: %d", id, temp++,b, b->blockno);
+    if (b->blockno == blockno && b->dev == dev)
+    {
+      //printf("match, dev:%d blockno:%d\n", b->dev, b->blockno);
+      b->refcnt++;
+      release(&cachelocks[id]);
+      acquiresleep(&b->lock);
+      return b;
+    }
+    /*else
+    {
+      printf(" not match,");
+    }
+    printf("\n");*/
+  }
+  release(&cachelocks[id]);
+
+  acquire(&bcache.lock);
+  for (int i=0; i<NBUF; i++)
+  {
+    //printf("index: %d, loop: %d, block address: %p exit\n", id,temp,b);
+    bcan=&bcache.buf[i];
+    if (bcan->refcnt == 0)
+    {
+      //printf("candidte: %p, can_idex: %d, b_idex:%d can_blockno: %d \n", bcan, bcan->blockno % HASHSIZ, id, bcan->blockno);
+      if (bcan->blockno % HASHSIZ != id)
+      {
+        bcan->valid = 0;
+        bcan->refcnt = 1;
+        bcan->dev = dev;
+        evict(bcan);
+        bcan->blockno = blockno;
+        install(bcan);
+      }
+      else
+      {
+        bcan->valid = 0;
+        bcan->refcnt = 1;
+        bcan->blockno = blockno;
+        if(!find(bcan))
+          install(bcan);
+      }
+      release(&bcache.lock);
+      acquiresleep(&bcan->lock);
+      return bcan;
+    }
+  }
+  panic("bget: no buffers");
+}
+
+void
+brelse(struct buf *b)
+{
+  if(!holdingsleep(&b->lock))
+    panic("brelse");
+  //acquire(&bcache.lock);
+  b->refcnt--;
+  if (b->refcnt == 0)
+  {
+    b->b_ticks = ticks;
+  }
+  //release(&bcache.lock);
+  releasesleep(&b->lock);
+}
+
+#endif
+
+#if !lock_lab
 void
 binit(void)
 {
   struct buf *b;
-
   initlock(&bcache.lock, "bcache");
-
   // Create linked list of buffers
   bcache.head.prev = &bcache.head;
   bcache.head.next = &bcache.head;
@@ -51,6 +207,8 @@ binit(void)
     bcache.head.next = b;
   }
 }
+
+
 
 // Look through buffer cache for block on device dev.
 // If not found, allocate a buffer.
@@ -88,6 +246,31 @@ bget(uint dev, uint blockno)
   panic("bget: no buffers");
 }
 
+// Release a locked buffer.
+// Move to the head of the most-recently-used list.
+void
+brelse(struct buf *b)
+{
+  if(!holdingsleep(&b->lock))
+    panic("brelse");
+
+  releasesleep(&b->lock);
+  acquire(&bcache.lock);
+  b->refcnt--;
+  if (b->refcnt == 0) {
+    // no one is waiting for it.
+    b->next->prev = b->prev;
+    b->prev->next = b->next;
+    b->next = bcache.head.next;
+    b->prev = &bcache.head;
+    bcache.head.next->prev = b;
+    bcache.head.next = b;
+  }
+  release(&bcache.lock);
+}
+
+#endif
+
 // Return a locked buf with the contents of the indicated block.
 struct buf*
 bread(uint dev, uint blockno)
@@ -111,30 +294,6 @@ bwrite(struct buf *b)
   virtio_disk_rw(b, 1);
 }
 
-// Release a locked buffer.
-// Move to the head of the most-recently-used list.
-void
-brelse(struct buf *b)
-{
-  if(!holdingsleep(&b->lock))
-    panic("brelse");
-
-  releasesleep(&b->lock);
-
-  acquire(&bcache.lock);
-  b->refcnt--;
-  if (b->refcnt == 0) {
-    // no one is waiting for it.
-    b->next->prev = b->prev;
-    b->prev->next = b->next;
-    b->next = bcache.head.next;
-    b->prev = &bcache.head;
-    bcache.head.next->prev = b;
-    bcache.head.next = b;
-  }
-  
-  release(&bcache.lock);
-}
 
 void
 bpin(struct buf *b) {

@@ -8,6 +8,8 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
+#define HASHSIZ 13
+#define BUFSIZ 20
 #ifdef LAB_NET
 struct mbuf;
 struct sock;
@@ -116,6 +118,8 @@ void            swtch(struct context*, struct context*);
 void            acquire(struct spinlock*);
 int             holding(struct spinlock*);
 void            initlock(struct spinlock*, char*);
+void            initcachehashlock(struct spinlock*, char*, int);
+void            initperCPUkmemlock(struct spinlock *lk, int i);
 void            release(struct spinlock*);
 void            push_off(void);
 void            pop_off(void);

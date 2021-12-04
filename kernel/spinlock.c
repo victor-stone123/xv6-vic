@@ -1,5 +1,5 @@
 // Mutual exclusion spin locks.
-
+#include <stdarg.h>
 #include "types.h"
 #include "param.h"
 #include "memlayout.h"
@@ -7,6 +7,8 @@
 #include "riscv.h"
 #include "proc.h"
 #include "defs.h"
+
+
 
 #ifdef LAB_LOCK
 #define NLOCK 500
@@ -43,6 +45,16 @@ findslot(struct spinlock *lk) {
 }
 #endif
 
+static char buf[HASHSIZ][BUFSIZ];
+void
+initcachehashlock(struct spinlock *lk, char *name, int i)
+{
+  snprintf((char *)buf[i], strlen(name) ,name,i);
+  lk->name=(char *)buf[i];
+  lk->locked = 0;
+  lk->cpu = 0;
+}
+
 void
 initlock(struct spinlock *lk, char *name)
 {
@@ -55,6 +67,16 @@ initlock(struct spinlock *lk, char *name)
   findslot(lk);
 #endif  
 }
+void
+initperCPUkmemlock(struct spinlock *lk, int i)
+{
+  static char buf[6];
+  snprintf(buf,6,"kmem_%d",i);
+  lk->name=buf;
+  lk->locked = 0;
+  lk->cpu = 0;
+}
+
 
 // Acquire the lock.
 // Loops (spins) until the lock is acquired.
