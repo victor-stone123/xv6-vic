@@ -25,6 +25,7 @@
 extern uint ticks;
 
 #define lock_lab 1
+#define lock_lab_new 0
 
 struct {
   struct spinlock lock;
@@ -39,6 +40,95 @@ struct {
 #if lock_lab
 static struct buf * cachehashtable[HASHSIZ];
 static struct spinlock cachelocks[HASHSIZ];
+#if lock_lab_new
+struct fcachequeuerecord
+{
+  struct spinlock lock;
+  int Front;
+  int Rear;
+  int size;
+  struct buf * array[NBUF];
+}fcachequeue;
+
+static struct fcachequeuerecord * fcachequeueptr = &fcachequeue;
+
+void 
+fcachequeueinit(void)
+{
+  initlock(&(fcachequeueptr->lock), "fbcache");
+  acquire(&(fcachequeueptr->lock));
+  fcachequeueptr->Front=0;
+  fcachequeueptr->Rear=NBUF-1;
+  fcachequeueptr->size=NBUF;
+  for (int i=0; i<NBUF; i++)
+  {
+    fcachequeueptr->array[i]=&bcache.buf[i];
+  }
+  release(&(fcachequeueptr->lock));
+}
+
+struct buf *
+
+getfreecache(void)
+{
+  //printf("getfree...\n");
+  int id;
+  acquire(&(fcachequeueptr->lock));
+  if (fcachequeueptr->size==0)
+    panic("bget: no buffers");
+  else
+  {
+    fcachequeueptr->size--;
+    //printf("size after getfree: %d\n", fcachequeueptr->size);
+    id = fcachequeueptr->Front;
+    fcachequeueptr->Front++;
+    if (fcachequeueptr->Front == NBUF)
+      fcachequeueptr->Front=0;
+    release(&(fcachequeueptr->lock));
+    return (fcachequeueptr->array[id]);
+  }
+}
+
+void 
+addfreecache(struct buf *b)
+{
+  //printf("addfree...\n");
+  int index;
+  int infreequeue=0;  
+  acquire(&(fcachequeueptr->lock));
+  index=fcachequeueptr->Front;
+  for(int i=0; i<fcachequeueptr->size; i++)
+  {
+    index=index+1;
+    if(index==NBUF)
+      index=0;
+    if (fcachequeueptr->array[index]==b)
+    {
+      infreequeue=1;
+      release(&(fcachequeueptr->lock));
+      break;
+    }
+  }
+  
+  if (infreequeue==0)
+  {
+    if (fcachequeueptr->size == NBUF)
+      panic("free cache is full");
+    else
+    {
+      fcachequeueptr->size++;
+     // printf("size after addfree: %d\n", fcachequeueptr->size);
+      fcachequeueptr->Rear++;
+      if(fcachequeueptr->Rear==NBUF)
+        fcachequeueptr->Rear=0;
+      fcachequeueptr->array[fcachequeueptr->Rear] = b;
+      release(&(fcachequeueptr->lock));
+    }
+  }
+
+}
+
+#endif
 
 void
 binit(void)
@@ -49,26 +139,24 @@ binit(void)
     initcachehashlock(&cachelocks[i], "bcache_%d", i);
     cachehashtable[i] = &bcache.head;
   }
-/*
-  for (int i=0; i<HASHSIZ; i++)
-  {
-    printf("%s\n",cachelocks[i].name);
-  }
-*/
+  #if lock_lab_new
+  fcachequeueinit();
+  #endif
 }
 
 void
 evict(struct buf * be)
 {
   int id=be->blockno % HASHSIZ;
+  //printf("evict index %d",id);
   struct buf * b;
   struct buf * bpre;
   acquire(&cachelocks[id]);
   for (bpre=b=cachehashtable[id]; b!=&bcache.head; bpre=b, b=b->next)
   {
-    //if (b->dev == be->dev && b->blockno == be->blockno)
     if ( b == be)
     {
+      //printf("needed\n");
       if (bpre==b)
       {
         cachehashtable[id]=be->next;
@@ -77,10 +165,10 @@ evict(struct buf * be)
       {
         bpre->next = be->next;
       }
-      //printf("index: %d, evict, block_address: %p， b->next address: %p\n", id, be, be->next);
       break;
     }
   }
+  //printf("\n");
   release(&cachelocks[id]);
 }
 
@@ -88,10 +176,10 @@ void
 install(struct buf *b)
 {
   int id = b->blockno % HASHSIZ;
+  //printf("install index:%d\n",id);
   acquire(&cachelocks[id]);
   b->next = cachehashtable[id];
   cachehashtable[id]=b;
-  //printf("index: %d, install, block address: %p, b->next address: %p\n", id, b, b->next);
   release(&cachelocks[id]);
 }
 int
@@ -117,57 +205,51 @@ static struct buf *
 bget(uint dev, uint blockno)
 {
   int id=blockno % HASHSIZ;
+  //printf("get from index:%d\n", id);
   struct buf * b;
   struct buf * bcan;
   struct buf * bcan_min;
-  /*
-  int ref_0_count=0;
-  uint ticksmin;
-  */
   acquire(&cachelocks[id]);
-  //int temp=0;
   for (b=cachehashtable[id]; b!= &bcache.head; b=b->next)
   {
-    //printf("index: %d, loop: %d, block address: %p, block no: %d", id, temp++,b, b->blockno);
     if (b->blockno == blockno && b->dev == dev)
     {
-      //printf("match, dev:%d blockno:%d\n", b->dev, b->blockno);
       b->refcnt++;
       release(&cachelocks[id]);
       acquiresleep(&b->lock);
       return b;
     }
-    /*else
-    {
-      printf(" not match,");
-    }
-    printf("\n");*/
   }
   release(&cachelocks[id]);
+#if lock_lab_new
+  bcan_min = bcan = getfreecache();
+  if (bcan_min->blockno % HASHSIZ != id)
+  {
+    bcan_min->valid = 0;
+    bcan_min->refcnt = 1;
+    bcan_min->dev = dev;
+    evict(bcan);
+    bcan_min->blockno = blockno;
+    install(bcan_min);
+  }
+  else
+  {
+    bcan_min->valid = 0;
+    bcan_min->refcnt = 1;
+    bcan_min->blockno = blockno;
+    if(!find(bcan_min))
+      install(bcan_min);
+  }
+  acquiresleep(&bcan_min->lock);
+  return bcan_min;
 
+#else
   acquire(&bcache.lock);
   for (int i=0; i<NBUF; i++)
   {
-    //printf("index: %d, loop: %d, block address: %p exit\n", id,temp,b);
     bcan=&bcache.buf[i];
     if (bcan->refcnt == 0)
     {
-    /* 
-      if (ref_0_count==0)
-      {
-        ticksmin= bcan->b_ticks;
-        bcan_min=bcan;
-      }
-      else if (bcan->b_ticks < ticksmin)
-      {
-        ticksmin= bcan->b_ticks;
-        bcan_min=bcan;
-      }
-      ref_0_count++;
-      if (i < NBUF-1)
-        continue;
-    */
-      //printf("candidte: %p, can_idex: %d, b_idex:%d can_blockno: %d \n", bcan, bcan->blockno % HASHSIZ, id, bcan->blockno);
       bcan_min=bcan;
       if (bcan_min->blockno % HASHSIZ != id)
       {
@@ -192,6 +274,8 @@ bget(uint dev, uint blockno)
     }
   }
   panic("bget: no buffers");
+#endif
+
 }
 
 void
@@ -199,13 +283,11 @@ brelse(struct buf *b)
 {
   if(!holdingsleep(&b->lock))
     panic("brelse");
-  //acquire(&bcache.lock);
   b->refcnt--;
-  if (b->refcnt == 0)
-  {
-    b->b_ticks = ticks;
-  }
-  //release(&bcache.lock);
+  #if lock_lab_new
+  if(b->refcnt==0)
+    addfreecache(b);
+  #endif
   releasesleep(&b->lock);
 }
 
@@ -318,16 +400,16 @@ bwrite(struct buf *b)
 
 void
 bpin(struct buf *b) {
-  acquire(&bcache.lock);
+  //acquire(&bcache.lock);
   b->refcnt++;
-  release(&bcache.lock);
+  //release(&bcache.lock);
 }
 
 void
 bunpin(struct buf *b) {
-  acquire(&bcache.lock);
+  //acquire(&bcache.lock);
   b->refcnt--;
-  release(&bcache.lock);
+  //release(&bcache.lock);
 }
 
 
