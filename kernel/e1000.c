@@ -9,10 +9,12 @@
 #include "net.h"
 
 #define TX_RING_SIZE 16
+struct spinlock tx_ring_lock;
 static struct tx_desc tx_ring[TX_RING_SIZE] __attribute__((aligned(16)));
 static struct mbuf *tx_mbufs[TX_RING_SIZE];
 
 #define RX_RING_SIZE 16
+struct spinlock rx_ring_lock;
 static struct rx_desc rx_ring[RX_RING_SIZE] __attribute__((aligned(16)));
 static struct mbuf *rx_mbufs[RX_RING_SIZE];
 
@@ -30,6 +32,8 @@ e1000_init(uint32 *xregs)
   int i;
 
   initlock(&e1000_lock, "e1000");
+  initlock(&rx_ring_lock, "rx ring");
+  initlock(&tx_ring_lock, "tx ring");
 
   regs = xregs;
 
@@ -102,8 +106,46 @@ e1000_transmit(struct mbuf *m)
   // the TX descriptor ring so that the e1000 sends it. Stash
   // a pointer so that it can be freed after sending.
   //
-  
-  return 0;
+
+  //printf("@start to transmit data!\n");
+
+  acquire(&tx_ring_lock);
+  struct mbuf *mb_pr = m;
+  struct tx_desc * desc_tx = 0;
+
+  int index = regs[E1000_TDT];
+  desc_tx = &tx_ring[index];
+  printf("@trans index is: %d\n", index);
+
+  if (desc_tx->status & E1000_TXD_STAT_DD) 
+  {
+    //desc_tx->status &= ~E1000_TXD_STAT_DD;
+    if(tx_mbufs[index])
+    {
+      mbuffree(tx_mbufs[index]);
+      tx_mbufs[index] = 0;
+    }
+
+    desc_tx->addr = (uint64)mb_pr->head;
+    desc_tx->length = mb_pr->len;
+    desc_tx->cmd |= E1000_TXD_CMD_EOP;    // set the command to the right mode
+
+    tx_mbufs[index] = mb_pr;                      // stash away the mbuf address for later free
+    
+    //index = (index + 1) % TX_RING_SIZE;       
+    regs[E1000_TDT] = (regs[E1000_TDT]+1) % TX_RING_SIZE;                        // update the E1000_TDT register to a new value
+    //printf("@data transmitted!\n");
+    
+    release(&tx_ring_lock);
+
+    return 0;
+  }
+  else
+  {
+    printf("@ transmit overflow!\n");
+    release(&tx_ring_lock);
+    return -1;
+  }
 }
 
 static void
@@ -115,6 +157,37 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
+  //printf("@start to receive data!\n");
+  //acquire(&rx_ring_lock);
+  struct mbuf *mb_pr = 0;
+  struct rx_desc * desc_rx = 0;
+
+  int index = (regs[E1000_RDT]+1) % RX_RING_SIZE;
+  if (regs[E1000_RDH] == index)
+    printf("@attention! the receive buffer has overflowed!\n");
+  desc_rx = &rx_ring[index];
+
+  while (desc_rx->status & E1000_TXD_STAT_DD)                                     // stop when there is no data to receive
+  {
+    desc_rx->status &= ~E1000_TXD_STAT_DD; 
+    //printf("@valid rx desc!\n");
+    mb_pr = rx_mbufs[index];
+    mb_pr->len = desc_rx->length;
+
+    //printf("buf dump: %s \n", mb_pr->head);
+    
+    net_rx(mb_pr);
+
+    rx_mbufs[index] = mbufalloc(0);
+    desc_rx->addr = (uint64)rx_mbufs[index] ->head;
+
+    index = (index+1) % RX_RING_SIZE;
+    desc_rx = &rx_ring[index];
+  }
+  
+  regs[E1000_RDT] = index-1;
+
+  //release(&rx_ring_lock);
 }
 
 void

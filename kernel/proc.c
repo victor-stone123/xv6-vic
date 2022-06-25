@@ -220,13 +220,13 @@ uchar initcode[] = {
   0x74, 0x00, 0x00, 0x24, 0x00, 0x00, 0x00, 0x00,
   0x00, 0x00, 0x00, 0x00
 };
-
+ 
 // Set up first user process.
 void
 userinit(void)
 {
   struct proc *p;
-
+ 
   p = allocproc();
   initproc = p;
   
@@ -234,16 +234,16 @@ userinit(void)
   // and data into it.
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
-
+ 
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
   p->trapframe->sp = PGSIZE;  // user stack pointer
-
+ 
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->cwd = namei("/");
-
+ 
   p->state = RUNNABLE;
-
+ 
   release(&p->lock);
 }
 

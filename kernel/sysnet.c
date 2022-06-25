@@ -116,6 +116,8 @@ sockread(struct sock *si, uint64 addr, int n)
 
   acquire(&si->lock);
   while (mbufq_empty(&si->rxq) && !pr->killed) {
+    printf("there is no data!\n");
+    //return 0;
     sleep(&si->rxq, &si->lock);
   }
   if (pr->killed) {
@@ -150,7 +152,9 @@ sockwrite(struct sock *si, uint64 addr, int n)
     mbuffree(m);
     return -1;
   }
-  net_tx_udp(m, si->raddr, si->lport, si->rport);
+  if (net_tx_udp(m, si->raddr, si->lport, si->rport) == -1)
+    return -1;
+
   return n;
 }
 
@@ -179,6 +183,7 @@ sockrecvudp(struct mbuf *m, uint32 raddr, uint16 lport, uint16 rport)
 found:
   acquire(&si->lock);
   mbufq_pushtail(&si->rxq, m);
+  printf("@try to wakeup\n");
   wakeup(&si->rxq);
   release(&si->lock);
   release(&lock);

@@ -160,7 +160,7 @@ in_cksum(const unsigned char *addr, int len)
 }
 
 // sends an ethernet packet
-static void
+static int
 net_tx_eth(struct mbuf *m, uint16 ethtype)
 {
   struct eth *ethhdr;
@@ -174,11 +174,13 @@ net_tx_eth(struct mbuf *m, uint16 ethtype)
   ethhdr->type = htons(ethtype);
   if (e1000_transmit(m)) {
     mbuffree(m);
+    return -1;
   }
+  return 0;
 }
 
 // sends an IP packet
-static void
+static int
 net_tx_ip(struct mbuf *m, uint8 proto, uint32 dip)
 {
   struct ip *iphdr;
@@ -195,11 +197,13 @@ net_tx_ip(struct mbuf *m, uint8 proto, uint32 dip)
   iphdr->ip_sum = in_cksum((unsigned char *)iphdr, sizeof(*iphdr));
 
   // now on to the ethernet layer
-  net_tx_eth(m, ETHTYPE_IP);
+  if (net_tx_eth(m, ETHTYPE_IP) == -1)
+    return -1;
+  return 0;
 }
 
 // sends a UDP packet
-void
+int
 net_tx_udp(struct mbuf *m, uint32 dip,
            uint16 sport, uint16 dport)
 {
@@ -213,7 +217,10 @@ net_tx_udp(struct mbuf *m, uint32 dip,
   udphdr->sum = 0; // zero means no checksum is provided
 
   // now on to the IP layer
-  net_tx_ip(m, IPPROTO_UDP, dip);
+  if (net_tx_ip(m, IPPROTO_UDP, dip)==-1)
+    return -1;
+
+  return 0;
 }
 
 // sends an ARP packet
